@@ -112,7 +112,6 @@ function Invoke-Caffeinate {
     #>
 
     [CmdletBinding(DefaultParameterSetName = 'Indefinite', SupportsShouldProcess)]
-    [Alias('caffeinate')]
     param(
         [ValidatePattern('^[disuDISU]+$')]
         [string]$Flags,
@@ -225,4 +224,74 @@ function Invoke-Caffeinate {
     } finally {
         Clear-SleepAssertion
     }
+}
+
+function caffeinate {
+    <#
+    .SYNOPSIS
+        Wrapper for Invoke-Caffeinate that supports POSIX-style bundled flags.
+
+    .DESCRIPTION
+        Expands arguments like -disu into -Flags disu before calling
+        Invoke-Caffeinate, enabling a macOS caffeinate-like CLI experience.
+
+    .EXAMPLE
+        caffeinate -disu -t 3600
+    #>
+    $targetCmd = Get-Command Invoke-Caffeinate -CommandType Function
+    $switchNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($p in $targetCmd.Parameters.Values) {
+        if ($p.SwitchParameter) {
+            $null = $switchNames.Add($p.Name)
+            foreach ($a in $p.Aliases) { $null = $switchNames.Add($a) }
+        }
+    }
+
+    $splatParams = @{}
+    $positionalArgs = [System.Collections.Generic.List[object]]::new()
+
+    $i = 0
+    while ($i -lt $args.Count) {
+        $current = $args[$i]
+
+        if ($current -is [string] -and $current -match '^-([disuDISU]{2,})$') {
+            $splatParams['Flags'] = $Matches[1].ToLower()
+        }
+        elseif ($current -is [string] -and $current -match '^-(.+):(.*)$') {
+            $paramName = $Matches[1]
+            $rawValue  = $Matches[2]
+            if ($rawValue -eq '$true')  { $splatParams[$paramName] = $true }
+            elseif ($rawValue -eq '$false') { $splatParams[$paramName] = $false }
+            else { $splatParams[$paramName] = $rawValue }
+        }
+        elseif ($current -is [string] -and $current -match '^-(.+)$') {
+            $paramName = $Matches[1]
+            if ($switchNames.Contains($paramName)) {
+                $splatParams[$paramName] = $true
+            }
+            elseif (($i + 1) -lt $args.Count) {
+                $splatParams[$paramName] = $args[$i + 1]
+                $i++
+            }
+            else {
+                $splatParams[$paramName] = $true
+            }
+        }
+        else {
+            $positionalArgs.Add($current)
+        }
+
+        $i++
+    }
+
+    if ($positionalArgs.Count -gt 0) {
+        $splatParams['Command'] = $positionalArgs[0]
+        if ($positionalArgs.Count -gt 1) {
+            $splatParams['ArgumentList'] = @($positionalArgs[1..($positionalArgs.Count - 1)])
+        }
+    }
+
+    Invoke-Caffeinate @splatParams
 }

@@ -19,13 +19,13 @@ Describe 'Module: PSCaffeinate' {
             $exportedFunctions | Should -Contain 'Invoke-Caffeinate'
         }
 
-        It 'exports the caffeinate alias' {
-            $exportedAliases = (Get-Module PSCaffeinate).ExportedAliases.Keys
-            $exportedAliases | Should -Contain 'caffeinate'
+        It 'exports the caffeinate wrapper function' {
+            $exportedFunctions = (Get-Module PSCaffeinate).ExportedFunctions.Keys
+            $exportedFunctions | Should -Contain 'caffeinate'
         }
 
-        It 'alias points to Invoke-Caffeinate' {
-            (Get-Alias caffeinate).ReferencedCommand.Name | Should -Be 'Invoke-Caffeinate'
+        It 'caffeinate command is available' {
+            Get-Command caffeinate -ErrorAction Stop | Should -Not -BeNullOrEmpty
         }
     }
 
@@ -192,6 +192,25 @@ Describe 'Module: PSCaffeinate' {
 
         It '-Flags rejects invalid characters' {
             { Invoke-Caffeinate -Flags 'xyz' -Timeout 1 -WhatIf } | Should -Throw
+        }
+    }
+
+    Context 'caffeinate wrapper function' {
+
+        It 'caffeinate -disu runs without error' {
+            $elapsed = Measure-Command { caffeinate -disu -t 1 }
+            $elapsed.TotalSeconds | Should -BeGreaterOrEqual 0.5
+        }
+
+        It 'caffeinate -di -t works with timeout' {
+            $elapsed = Measure-Command { caffeinate -di -t 2 }
+            $elapsed.TotalSeconds | Should -BeGreaterOrEqual 1.5
+            $elapsed.TotalSeconds | Should -BeLessThan 5
+        }
+
+        It 'caffeinate passes through non-flag args' {
+            $output = caffeinate cmd.exe /c echo wrapper_test_token
+            $output | Should -Contain 'wrapper_test_token'
         }
     }
 

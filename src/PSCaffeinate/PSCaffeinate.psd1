@@ -12,8 +12,8 @@
     PowerShellVersion     = '5.1'
     CompatiblePSEditions  = @('Desktop', 'Core')
 
-    FunctionsToExport     = @('Invoke-Caffeinate')
-    AliasesToExport       = @('caffeinate')
+    FunctionsToExport     = @('Invoke-Caffeinate', 'caffeinate')
+    AliasesToExport       = @()
     CmdletsToExport       = @()
     VariablesToExport     = @()
 
