@@ -15,10 +15,20 @@ if (-not ('PSCaffeinate.NativeMethods' -as [type])) {
 Set-Variable -Scope Script -Name ES_CONTINUOUS       -Value ([uint32]2147483648) -Option Constant
 Set-Variable -Scope Script -Name ES_SYSTEM_REQUIRED  -Value ([uint32]0x00000001) -Option Constant
 Set-Variable -Scope Script -Name ES_DISPLAY_REQUIRED -Value ([uint32]0x00000002) -Option Constant
-Set-Variable -Scope Script -Name ES_USER_PRESENT     -Value ([uint32]0x00000004) -Option Constant
+Set-Variable -Scope Script -Name ES_USER_PRESENT     -Value ([uint32]0x00000004) -Option Constant # deprecated; not passed to API
 #endregion
 
 #region Private helpers
+function Set-SleepAssertion {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    param([uint32]$Flags)
+    $result = [PSCaffeinate.NativeMethods]::SetThreadExecutionState($Flags)
+    if ($result -eq 0) {
+        Write-Warning -Message 'caffeinate: SetThreadExecutionState returned 0 -- sleep prevention may not be active.'
+    }
+    return $result
+}
+
 function Clear-SleepAssertion {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     param()
@@ -62,8 +72,8 @@ function Invoke-Caffeinate {
         Alias: -s
 
     .PARAMETER UserActive
-        Assert that the user is active, resetting the idle and screensaver timers
-        (ES_USER_PRESENT).
+        Assert that the user is active. ES_USER_PRESENT is deprecated on modern
+        Windows, so -u is treated as -d -i (display + idle-sleep prevention).
         Alias: -u
 
     .PARAMETER Timeout
@@ -112,7 +122,6 @@ function Invoke-Caffeinate {
     #>
 
     [CmdletBinding(DefaultParameterSetName = 'Indefinite', SupportsShouldProcess)]
-    [Alias('caffeinate')]
     param(
         [ValidatePattern('^[disuDISU]+$')]
         [string]$Flags,
@@ -163,8 +172,12 @@ function Invoke-Caffeinate {
     #region Build execution-state flags
     [uint32]$executionFlags = $script:ES_CONTINUOUS
 
+    if ($UserActive) {
+        Write-Verbose -Message 'caffeinate: -u (ES_USER_PRESENT) is deprecated on modern Windows; substituting display + idle-sleep prevention.'
+        $executionFlags = $executionFlags -bor $script:ES_DISPLAY_REQUIRED -bor $script:ES_SYSTEM_REQUIRED
+    }
+
     if ($PreventDisplaySleep) { $executionFlags = $executionFlags -bor $script:ES_DISPLAY_REQUIRED }
-    if ($UserActive)          { $executionFlags = $executionFlags -bor $script:ES_USER_PRESENT     }
 
     if ($PreventIdleSleep -or $PreventSystemSleep -or
         (-not $PreventDisplaySleep -and -not $UserActive)) {
@@ -174,7 +187,6 @@ function Invoke-Caffeinate {
     $assertionNames = [System.Collections.Generic.List[string]]::new()
     if ($executionFlags -band $script:ES_DISPLAY_REQUIRED) { $assertionNames.Add('display')     }
     if ($executionFlags -band $script:ES_SYSTEM_REQUIRED)  { $assertionNames.Add('system-idle') }
-    if ($executionFlags -band $script:ES_USER_PRESENT)     { $assertionNames.Add('user-active') }
 
     $assertionLabel = $assertionNames -join ', '
     #endregion
@@ -183,7 +195,7 @@ function Invoke-Caffeinate {
         return
     }
 
-    $null = [PSCaffeinate.NativeMethods]::SetThreadExecutionState([uint32]$executionFlags)
+    $null = Set-SleepAssertion -Flags $executionFlags
     Write-Verbose -Message "caffeinate: holding [$assertionLabel] sleep assertions"
 
     try {
@@ -192,8 +204,13 @@ function Invoke-Caffeinate {
             'Timeout' {
                 Write-Information -MessageData "caffeinate: awake for $Timeout second(s) -- Ctrl+C to stop early." -InformationAction Continue
                 $deadline = [datetime]::UtcNow.AddSeconds($Timeout)
+                $nextReassert = [datetime]::UtcNow.AddSeconds(30)
                 while ([datetime]::UtcNow -lt $deadline) {
                     Start-Sleep -Milliseconds 500
+                    if ([datetime]::UtcNow -ge $nextReassert) {
+                        $null = Set-SleepAssertion -Flags $executionFlags
+                        $nextReassert = [datetime]::UtcNow.AddSeconds(30)
+                    }
                 }
             }
 
@@ -204,7 +221,9 @@ function Invoke-Caffeinate {
                     return
                 }
                 Write-Information -MessageData "caffeinate: waiting for PID $WaitPid ($($targetProcess.ProcessName)) -- Ctrl+C to stop early." -InformationAction Continue
-                $targetProcess.WaitForExit()
+                while (-not $targetProcess.WaitForExit(30000)) {
+                    $null = Set-SleepAssertion -Flags $executionFlags
+                }
                 Write-Verbose -Message "caffeinate: PID $WaitPid exited with code $($targetProcess.ExitCode)."
             }
 
@@ -219,10 +238,83 @@ function Invoke-Caffeinate {
 
             default {
                 Write-Information -MessageData 'caffeinate: running indefinitely -- Ctrl+C to stop.' -InformationAction Continue
-                while ($true) { Start-Sleep -Seconds 30 }
+                while ($true) {
+                    Start-Sleep -Seconds 30
+                    $null = Set-SleepAssertion -Flags $executionFlags
+                }
             }
         }
     } finally {
         Clear-SleepAssertion
     }
+}
+
+function caffeinate {
+    <#
+    .SYNOPSIS
+        Wrapper for Invoke-Caffeinate that supports POSIX-style bundled flags.
+
+    .DESCRIPTION
+        Expands arguments like -disu into -Flags disu before calling
+        Invoke-Caffeinate, enabling a macOS caffeinate-like CLI experience.
+
+    .EXAMPLE
+        caffeinate -disu -t 3600
+    #>
+    $targetCmd = Get-Command Invoke-Caffeinate -CommandType Function
+    $switchNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($p in $targetCmd.Parameters.Values) {
+        if ($p.SwitchParameter) {
+            $null = $switchNames.Add($p.Name)
+            foreach ($a in $p.Aliases) { $null = $switchNames.Add($a) }
+        }
+    }
+
+    $splatParams = @{}
+    $positionalArgs = [System.Collections.Generic.List[object]]::new()
+
+    $i = 0
+    while ($i -lt $args.Count) {
+        $current = $args[$i]
+
+        if ($current -is [string] -and $current -match '^-([disuDISU]{2,})$') {
+            $splatParams['Flags'] = $Matches[1].ToLower()
+        }
+        elseif ($current -is [string] -and $current -match '^-(.+):(.*)$') {
+            $paramName = $Matches[1]
+            $rawValue  = $Matches[2]
+            if ($rawValue -eq '$true')  { $splatParams[$paramName] = $true }
+            elseif ($rawValue -eq '$false') { $splatParams[$paramName] = $false }
+            else { $splatParams[$paramName] = $rawValue }
+        }
+        elseif ($current -is [string] -and $current -match '^-(.+)$') {
+            $paramName = $Matches[1]
+            if ($switchNames.Contains($paramName)) {
+                $splatParams[$paramName] = $true
+            }
+            elseif (($i + 1) -lt $args.Count) {
+                $splatParams[$paramName] = $args[$i + 1]
+                $i++
+            }
+            else {
+                $splatParams[$paramName] = $true
+            }
+        }
+        else {
+            $positionalArgs.Add($current)
+        }
+
+        $i++
+    }
+
+    if ($positionalArgs.Count -gt 0) {
+        $splatParams['Command'] = $positionalArgs[0]
+        if ($positionalArgs.Count -gt 1) {
+            $splatParams['ArgumentList'] = @($positionalArgs[1..($positionalArgs.Count - 1)])
+        }
+    }
+
+    Invoke-Caffeinate @splatParams
 }
