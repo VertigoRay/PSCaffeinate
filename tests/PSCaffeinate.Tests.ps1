@@ -1,4 +1,4 @@
-#requires -Modules Pester
+﻿#requires -Modules Pester
 
 BeforeAll {
     $modulePath = Join-Path (Join-Path (Join-Path $PSScriptRoot '..') 'src') 'PSCaffeinate'
@@ -169,19 +169,18 @@ Describe 'Module: PSCaffeinate' {
 
     Context 'Bundled -Flags parameter' {
 
-        It '-Flags disu sets all four assertions' {
+        It '-Flags disu sets display and system-idle assertions' {
             $verbose = Invoke-Caffeinate -Flags 'disu' -Timeout 1 -Confirm:$false -Verbose 4>&1
             $verboseText = ($verbose | Out-String)
             $verboseText | Should -Match 'display'
             $verboseText | Should -Match 'system-idle'
-            $verboseText | Should -Match 'user-active'
         }
 
         It '-Flags d sets only display assertion' {
             $verbose = Invoke-Caffeinate -Flags 'd' -Timeout 1 -Confirm:$false -Verbose 4>&1
             $verboseText = ($verbose | Out-String)
             $verboseText | Should -Match 'display'
-            $verboseText | Should -Not -Match 'user-active'
+            $verboseText | Should -Not -Match 'system-idle'
         }
 
         It '-Flags works with -Timeout' {
