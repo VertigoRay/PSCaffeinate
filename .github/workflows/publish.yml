@@ -1,0 +1,45 @@
+name: Publish to PowerShell Gallery
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Publish module
+    runs-on: windows-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -MinimumVersion 5.0 -Scope CurrentUser -Force
+          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+
+      - name: Run tests before publish
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+
+      - name: Validate manifest version matches release tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name }}" -replace '^v', ''
+          $manifest = Test-ModuleManifest -Path ./src/PSCaffeinate/PSCaffeinate.psd1
+          if ($manifest.Version.ToString() -ne $tag) {
+            throw "Manifest version ($($manifest.Version)) does not match release tag ($tag). Update the manifest before publishing."
+          }
+          Write-Host "Version $tag confirmed."
+
+      - name: Publish to PowerShell Gallery
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ secrets.PS_GALLERY_API_KEY }}
+        run: |
+          Publish-Module -Path ./src/PSCaffeinate -NuGetApiKey $env:NUGET_API_KEY -Verbose

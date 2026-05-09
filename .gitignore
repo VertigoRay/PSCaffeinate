@@ -1,0 +1,14 @@
+# Build artifacts
+*.nupkg
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Test results
+testResults.xml
