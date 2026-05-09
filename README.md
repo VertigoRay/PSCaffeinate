@@ -1,5 +1,9 @@
 # PSCaffeinate
 
+[![CI](https://github.com/VertigoRay/PSCaffeinate/actions/workflows/test.yml/badge.svg)](https://github.com/VertigoRay/PSCaffeinate/actions/workflows/test.yml)
+[![version](https://img.shields.io/powershellgallery/v/PSCaffeinate.svg)](https://www.powershellgallery.com/packages/PSCaffeinate)
+[![downloads](https://img.shields.io/powershellgallery/dt/PSCaffeinate.svg?label=downloads)](https://www.powershellgallery.com/stats/packages/PSCaffeinate?groupby=Version)
+
 A PowerShell module that prevents Windows from sleeping -- a drop-in equivalent of macOS `caffeinate`.
 
 Uses the Win32 `SetThreadExecutionState` API (the same mechanism used by video players and Teams calls) to hold sleep-prevention assertions.
