@@ -1,6 +1,6 @@
 ﻿@{
     RootModule            = 'PSCaffeinate.psm1'
-    ModuleVersion         = '1.0.0'
+    ModuleVersion         = '1.1.0'
     GUID                  = 'f3a7d2e1-8b4c-4f9a-b1e5-2c6d3f8a0e7b'
 
     Author                = 'Ray Piller'
@@ -23,7 +23,7 @@
                              'Windows', 'productivity', 'SetThreadExecutionState')
             LicenseUri   = 'https://github.com/VertigoRay/PSCaffeinate/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/VertigoRay/PSCaffeinate'
-            ReleaseNotes = 'v1.0.0 - Initial release. Invoke-Caffeinate with alias caffeinate. Flags: -d (display), -i (idle), -s (system), -u (user-active). Modes: indefinite, -t timeout, -w PID, subprocess. ShouldProcess / -WhatIf support. Platform guard for non-Windows PowerShell Core.'
+            ReleaseNotes = 'v1.1.0 - Fix: ES_USER_PRESENT is deprecated on modern Windows and caused SetThreadExecutionState to silently fail; -u now substitutes display + idle-sleep prevention. Fix: POSIX-style bundled flags (caffeinate -disu) now work via a wrapper function with hashtable splatting. Added return-value checking and periodic re-assertion of sleep prevention every 30s.'
         }
     }
 }
